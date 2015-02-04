@@ -1,0 +1,12 @@
+diff --git a/git/LINUX/netmap_linux.c b/LINUX/netmap_linux.c
+index a4d30c0..9af1fc3 100644
+--- a/git/LINUX/netmap_linux.c
++++ b/git/LINUX/netmap_linux.c
+@@ -31,6 +31,7 @@
+ #include <dev/netmap/netmap_mem2.h>
+ #include <linux/rtnetlink.h>
+ #include <linux/nsproxy.h>
++#include <net/ip6_checksum.h>   /* for csum_ipv6_magic() */
+ 
+ #include "netmap_linux_config.h"
+ 

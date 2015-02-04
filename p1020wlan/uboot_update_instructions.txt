@@ -1,0 +1,71 @@
+In order to boot images generated with SDK 1.6, the version of u-boot needs to be updated on the p1020wlan device.  You might have seen a gunzip error if you tried to boot to Linux with the 2009 version of u-boot.
+
+Requirements:
+A) This assumes you have already setup a tftp server and are able to transfer files into the u-boot enviornemnt.  
+B) Download, verify md5, and unzip the u-boot binary.  Copy the files in the u-boot folder to your tftp server.
+https://mega.co.nz/#F!swoA1A4L!T8tYgeO2L2YjAJXM_QWX5w
+u-boot-P1020SKU.zip
+u-boot-P1020SKU.zip.md5
+C) Enter into u-boot console using the serial port on the p1020wlan.
+
+
+U-Boot Update Procedure:
+1) Make sure u-boot does live where you expect using the memory dump command:
+> md 0xeff80000
+
+   You should see this as a result:
+eff80000: 27051956 552d426f 6f742032 3030392e    '..VU-Boot 2009.
+...
+
+2) Now load the new u-boot into RAM:
+tftp 1000000 u-boot-P1020SKU.bin
+
+   You can verify the location in RAM by using the memory dump command again:
+> md 0x1000000
+
+  You should see this as a result:
+eff80000: 27051956 552d426f 6f742032 3031332e    '..VU-Boot 2013.
+...
+
+3) Now be very careful and flash the uboot:
+> protect off all
+> erase 0xeff80000 efffffff
+> cp.b  1000000 0xeff80000 80000
+
+4) Do not leave this u-boot console until you verify the flash was sucessful!!
+> md 0xeff80000
+
+  Should now look exactly like (matching the RAM memory dump earlier):
+eff80000: 27051956 552d426f 6f742032 3031332e    '..VU-Boot 2013.
+eff80010: 30312d64 69727479 20284a61 6e203233    01-dirty (Jan 23
+eff80020: 20323031 34202d20 31393a34 303a3338     2014 - 19:40:38
+eff80030: 29000000 00000000 00000000 00000000    )...............
+
+5) Once you are completly satisifed that the flash occurred sucessfully, cross your fingers and reboot:
+> reset
+
+  You should immediately see the new u-boot version badge:
+U-Boot 2013.01-dirty (Jan 23 2014 - 19:40:38)
+
+6) You may want to update u-boot's enviornment variables as needed to point u-boot to your kernel, device tree, and filesystem.  Update ethernet for th
+> setenv ramboot 'setenv bootargs root=/dev/ram rw ramdisk_size=$ramdisksize console=$consoledev,$baudrate $othbootargs;tftp $ramdiskaddr $ramdiskfile;tftp $loadaddr $bootfile;tftp $fdtaddr $fdtfile;bootm $loadaddr $ramdiskaddr $fdtaddr'
+> setenv othbootargs 'cache-sram-size=0x10000 cache-sram-offset=0xfff00000'
+> setenv ethaddr <mac address for eth0>  (i.e. '00:04:9F:xx:xx:xx')
+> setenv eth1addr <mac address for eth1>  (i.e. '00:04:9F:xx:xx:xx')
+> setenv ipaddr <static ip address on lan>  (i.e. '192.168.0.102')
+> setenv gatewayip <gateway ip for lan>  (i.e. '192.168.0.1')
+> setenv serverip <static ip of tftp server>
+> setenv ramdiskfile rootfs.ext2.gz.uboot
+> setenv ramdisksize 134217728
+> setenv bootfile p1020wlan.bin
+> setenv fdtfile p1020wlan.dtb
+> saveenv
+
+7) Using the above configuration, sets the approprite variables to load images from a tftp server and boot from ram.  The default boot will remain untouched (i.e. boot from flash).  Upon each power cycle, you must interrupt u-boot and specify ramboot:
+> env run ramboot
+
+8) If you haven't already, aquire the latest kernel, device tree, and file system from the Mega folder:
+https://mega.co.nz/#F!swoA1A4L!T8tYgeO2L2YjAJXM_QWX5w
+
+Note: Details on how to commit an image to the NOR flash will follow later...
+
