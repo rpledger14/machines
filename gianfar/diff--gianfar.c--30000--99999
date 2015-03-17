@@ -1,0 +1,159 @@
+--- a/gianfar.c
++++ b/gianfar.c
+@@ -186,6 +186,13 @@
+ MODULE_DESCRIPTION("Gianfar Ethernet Driver");
+ MODULE_LICENSE("GPL");
+ 
++#if defined(DEV_NETMAP) || defined(CONFIG_NETMAP) || defined(CONFIG_NETMAP_MODULE)
++/*Few forward declarations*/
++static void gfar_init_rxbdp(struct gfar_priv_rx_q *rx_queue, struct rxbd8 *bdp,
++			    dma_addr_t buf);
++#include <if_gianfar_netmap.h>
++#endif /*DEV_NETMAP*/
++
+ DEFINE_PER_CPU(struct sk_buff_head, skb_recycle_list);
+ 
+ #define GFAR_RXB_REC_SZ (DEFAULT_RX_BUFFER_SIZE + RXBUF_ALIGNMENT)
+@@ -299,7 +306,7 @@
+ 
+ 	if (!vaddr)
+ 		return -ENOMEM;
+-
++	
+ 	for (i = 0; i < priv->num_tx_queues; i++) {
+ 		tx_queue = priv->tx_queue[i];
+ 		tx_queue->tx_bd_base = vaddr;
+@@ -347,6 +354,14 @@
+ 			rx_queue->rx_skbuff[j] = NULL;
+ 	}
+ 
++#ifdef DEV_NETMAP
++	if(gfar_netmap_init_bds(priv))
++	 {
++		printk("Successfully completed BD initialization");
++		 return 0;
++	 }
++#endif /*DEV_NETMAP*/
++
+ 	if (gfar_init_bds(ndev))
+ 		goto cleanup;
+ 
+@@ -1409,8 +1424,11 @@
+ 	dev->mtu = 1500;
+ 	dev->netdev_ops = &gfar_netdev_ops;
+ 	dev->ethtool_ops = &gfar_ethtool_ops;
+-
+-	/* Register for napi ...We are registering NAPI for each grp */
++	printk(KERN_INFO "Number of ETSEC groups:%d", priv->num_grps);
++	printk(KERN_INFO "Number of TX queues:%d", priv->num_tx_queues);
++	printk(KERN_INFO "Number of RX queues:%d", priv->num_rx_queues);
++	printk(KERN_INFO "ETSEC mode:%d and POLL mode:%d", (int)priv->mode, (int)priv->poll_mode);
++ 	/* Register for napi ...We are registering NAPI for each grp */
+ 	for (i = 0; i < priv->num_grps; i++) {
+ 		if (priv->poll_mode == GFAR_SQ_POLLING) {
+ 			netif_napi_add(dev, &priv->gfargrp[i].napi_rx,
+@@ -1485,6 +1503,10 @@
+ 		goto register_fail;
+ 	}
+ 
++#ifdef DEV_NETMAP
++	gfar_netmap_attach(priv);
++#endif /*DEV_NETMAP*/
++
+ 	/* Carrier starts down, phylib will bring it up */
+ 	netif_carrier_off(dev);
+ 
+@@ -1563,6 +1585,11 @@
+ 	unmap_group_regs(priv);
+ 	gfar_free_rx_queues(priv);
+ 	gfar_free_tx_queues(priv);
++
++#ifdef DEV_NETMAP
++	netmap_detach(priv->ndev);
++#endif /*DEV_NETMAP*/
++
+ 	free_gfar_dev(priv);
+ 
+ 	return 0;
+@@ -2106,6 +2133,10 @@
+ {
+ 	struct gfar_private *priv = netdev_priv(dev);
+ 
++#ifdef DEV_NETMAP
++	netmap_disable_all_rings(dev);
++#endif /*DEV_NETMAP*/
++
+ 	smp_mb__before_clear_bit();
+ 	set_bit(GFAR_DOWN, &priv->state);
+ 	smp_mb__after_clear_bit();
+@@ -2380,6 +2411,10 @@
+ 
+ 	enable_napi(priv);
+ 
++#ifdef DEV_NETMAP
++	netmap_enable_all_rings(ndev);
++#endif /*DEV_NETMAP*/
++
+ 	return 0;
+ }
+ 
+@@ -2789,6 +2824,11 @@
+ 	u32 lstatus;
+ 	size_t buflen;
+ 
++#ifdef DEV_NETMAP
++        if (netmap_tx_irq(dev, 0))
++	  return; /* cleaned ok */
++#endif /* DEV_NETMAP */
++
+ 	txq = netdev_get_tx_queue(dev, tqi);
+ 	bdp = tx_queue->dirty_tx;
+ 	skb_dirtytx = tx_queue->skb_dirtytx;
+@@ -3001,6 +3041,12 @@
+ 	int howmany = 0;
+ 	struct gfar_private *priv = netdev_priv(dev);
+ 
++	
++#ifdef DEV_NETMAP
++        if (netmap_rx_irq(dev, 0, &rx_work_limit))
++ 		return 1; /* seems to be ignored */
++#endif /* DEV_NETMAP */
++
+ #ifdef CONFIG_AS_FASTPATH
+ 	return gfar_asf_clean_rx_ring(rx_queue, rx_work_limit);
+ #endif
+@@ -3649,20 +3695,24 @@
+ 
+ 		netif_dbg(priv, rx_err, dev, "busy error (rstat: %x)\n",
+ 			  gfar_read(&regs->rstat));
++		printk(KERN_INFO "busy error rstat: %x\n", gfar_read(&regs->rstat)); 
+ 	}
+ 	if (events & IEVENT_BABR) {
+ 		dev->stats.rx_errors++;
+ 		atomic64_inc(&priv->extra_stats.rx_babr);
+ 
+ 		netif_dbg(priv, rx_err, dev, "babbling RX error\n");
++		printk(KERN_INFO "Babbling receive error\n");
+ 	}
+ 	if (events & IEVENT_EBERR) {
+ 		atomic64_inc(&priv->extra_stats.eberr);
+ 		netif_dbg(priv, rx_err, dev, "bus error\n");
++		printk("Bus error\n");
+ 	}
+ 	if (events & IEVENT_RXC)
+-		netif_dbg(priv, rx_status, dev, "control frame\n");
+-
++	{	netif_dbg(priv, rx_status, dev, "control frame\n");
++		printk(KERN_INFO "Control Frame\n");
++	}
+ 	if (events & IEVENT_BABT) {
+ 		atomic64_inc(&priv->extra_stats.tx_babt);
+ 		netif_dbg(priv, tx_err, dev, "babbling TX error\n");
+@@ -3683,6 +3733,7 @@
+ 			val |= MACCFG1_TX_FLOW;
+ 		if (priv->rx_pause_en)
+ 			val |= MACCFG1_RX_FLOW;
++	printk(KERN_INFO "Flow control value %x", val);
+ 	} else {
+ 		u16 lcl_adv, rmt_adv;
+ 		u8 flowctrl;
